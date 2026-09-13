@@ -1,0 +1,44 @@
+name: Build NR package (RR route + NVFP4 hybrid)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version label'
+        required: true
+        default: '0.8.3-rr'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Apply source overlay (nr-rr-route-overlay.zip in the repo root, if present)
+        shell: powershell
+        run: |
+          if (Test-Path -LiteralPath 'nr-rr-route-overlay.zip') {
+            Expand-Archive -LiteralPath 'nr-rr-route-overlay.zip' -DestinationPath '.' -Force
+            Write-Output 'Overlay applied.'
+          } else {
+            Write-Output 'No overlay zip found; building the committed tree.'
+          }
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Package
+        shell: powershell
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: ./package_release.ps1 -Version $env:PACKAGE_VERSION
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: OptiScaler-NR-${{ inputs.version }}
+          path: release/*.zip
+          if-no-files-found: error
