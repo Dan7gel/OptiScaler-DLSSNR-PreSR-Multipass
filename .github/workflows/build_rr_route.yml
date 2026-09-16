@@ -29,6 +29,25 @@ jobs:
           } else {
             Write-Output 'No overlay zip found; building the committed tree.'
           }
+      - name: Compile the NR resolve shader (fxc, cs_5_0, entry CSMain)
+        shell: powershell
+        run: |
+          $fxc = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\fxc.exe' |
+                 Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $fxc) { throw 'fxc.exe not found in the Windows SDK' }
+          $dir = 'OptiScaler\shaders\dlssnr\precompile'
+          & $fxc.FullName /nologo /T cs_5_0 /E CSMain /O3 /Fo "$dir\DlssNr_Shader.cso" "$dir\dlssnr.hlsl"
+          if ($LASTEXITCODE -ne 0) { throw "fxc failed with $LASTEXITCODE" }
+          $bytes = [System.IO.File]::ReadAllBytes("$dir\DlssNr_Shader.cso")
+          $sb = New-Object System.Text.StringBuilder
+          [void]$sb.Append("#pragma once`n`ninline static const unsigned char DlssNr_cso[] = {`n")
+          for ($i = 0; $i -lt $bytes.Length; $i += 12) {
+            $chunk = $bytes[$i..([Math]::Min($i + 11, $bytes.Length - 1))] | ForEach-Object { '0x{0:x2}' -f $_ }
+            [void]$sb.Append('    ' + ($chunk -join ', ') + ", `n")
+          }
+          [void]$sb.Append("};`n")
+          [System.IO.File]::WriteAllText("$dir\DlssNr_Shader.h", $sb.ToString())
+          Write-Output ("Compiled dlssnr.hlsl: {0} bytes" -f $bytes.Length)
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
       - name: Package
