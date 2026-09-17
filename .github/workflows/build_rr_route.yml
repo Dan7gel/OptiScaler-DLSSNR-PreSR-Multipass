@@ -48,6 +48,19 @@ jobs:
           [void]$sb.Append("};`n")
           [System.IO.File]::WriteAllText("$dir\DlssNr_Shader.h", $sb.ToString())
           Write-Output ("Compiled dlssnr.hlsl: {0} bytes" -f $bytes.Length)
+          # Temporal reuse shader (ULTIMATE77), same treatment.
+          & $fxc.FullName /nologo /T cs_5_0 /E CSMain /O3 /Fo "$dir\dlssnr_temporal_Shader.cso" "$dir\dlssnr_temporal.hlsl"
+          if ($LASTEXITCODE -ne 0) { throw "fxc failed on dlssnr_temporal.hlsl with $LASTEXITCODE" }
+          $tbytes = [System.IO.File]::ReadAllBytes("$dir\dlssnr_temporal_Shader.cso")
+          $tsb = New-Object System.Text.StringBuilder
+          [void]$tsb.Append("#pragma once`n`ninline static const unsigned char dlssnr_temporal_cso[] = {`n")
+          for ($i = 0; $i -lt $tbytes.Length; $i++) {
+            [void]$tsb.Append(("0x{0:x2}," -f $tbytes[$i]))
+            if (($i % 16) -eq 15) { [void]$tsb.Append("`n") }
+          }
+          [void]$tsb.Append("`n};`n")
+          [System.IO.File]::WriteAllText("$dir\dlssnr_temporal_Shader.h", $tsb.ToString())
+          Write-Output ("Compiled dlssnr_temporal.hlsl: {0} bytes" -f $tbytes.Length)
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
       - name: Package
