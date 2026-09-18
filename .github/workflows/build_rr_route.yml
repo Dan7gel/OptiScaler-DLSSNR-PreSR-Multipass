@@ -62,6 +62,23 @@ jobs:
           [void]$sb.Append("};`n")
           [System.IO.File]::WriteAllText("$dir\DlssNr_Shader.h", $sb.ToString())
           Write-Output ("Compiled dlssnr.hlsl: {0} bytes" -f $bytes.Length)
+          # Residual (accumulate/apply) shader and finished-colour shader, same treatment.
+          foreach ($pair in @(@('dlssnr_residual.hlsl', 'dlssnr_residual_Shader', 'dlssnr_residual_cso'),
+                              @('dlssnr_finished_color.hlsl', 'dlssnr_finished_color_Shader', 'dlssnr_finished_color_cso'))) {
+            $src = $pair[0]; $stem = $pair[1]; $sym = $pair[2]
+            & $fxc.FullName /nologo /T cs_5_0 /E CSMain /O3 /Fo "$dir\$stem.cso" "$dir\$src"
+            if ($LASTEXITCODE -ne 0) { throw "fxc failed on $src with $LASTEXITCODE" }
+            $b = [System.IO.File]::ReadAllBytes("$dir\$stem.cso")
+            $s2 = New-Object System.Text.StringBuilder
+            [void]$s2.Append("#pragma once`n`ninline static const unsigned char $sym[] = {`n")
+            for ($i = 0; $i -lt $b.Length; $i += 12) {
+              $chunk = $b[$i..([Math]::Min($i + 11, $b.Length - 1))] | ForEach-Object { '0x{0:x2}' -f $_ }
+              [void]$s2.Append('    ' + ($chunk -join ', ') + ", `n")
+            }
+            [void]$s2.Append("};`n")
+            [System.IO.File]::WriteAllText("$dir\$stem.h", $s2.ToString())
+            Write-Output ("Compiled {0}: {1} bytes" -f $src, $b.Length)
+          }
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
       - name: Package
@@ -69,6 +86,28 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
         run: ./package_release.ps1 -Version $env:PACKAGE_VERSION
+      - name: Bundle the NVFP4 hybrid assets (nvfp4.zip in the repo root, if present)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'nvfp4.zip')) { Write-Host 'No nvfp4.zip in the repo; the package ships without hybrid assets'; exit 0 }
+          $pkg = Get-ChildItem -Path 'release' -Filter '*.zip' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $pkg) { throw 'Package zip not found in release/' }
+          $work = Join-Path $env:RUNNER_TEMP 'pkg'
+          if (Test-Path $work) { Remove-Item $work -Recurse -Force }
+          Expand-Archive -LiteralPath $pkg.FullName -DestinationPath $work -Force
+          $optiDir = Get-ChildItem -Path $work -Directory -Recurse -Filter 'OptiScaler' | Select-Object -First 1
+          if (-not $optiDir) { $optiDir = New-Item -ItemType Directory -Path (Join-Path $work 'OptiScaler') }
+          $dest = Join-Path $optiDir.FullName 'nvfp4'
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          $tmp = Join-Path $env:RUNNER_TEMP 'nvfp4src'
+          if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+          Expand-Archive -LiteralPath 'nvfp4.zip' -DestinationPath $tmp -Force
+          $src = Get-ChildItem -Path $tmp -Directory -Recurse -Filter 'nvfp4' | Select-Object -First 1
+          if (-not $src) { throw 'nvfp4.zip does not contain an nvfp4 folder' }
+          Copy-Item -Path $src.FullName -Destination $dest -Recurse
+          Remove-Item $pkg.FullName -Force
+          Compress-Archive -Path (Join-Path $work '*') -DestinationPath $pkg.FullName -Force
+          Write-Host ("Bundled {0} hybrid assets into {1}" -f (Get-ChildItem $dest -Recurse -File).Count, $pkg.Name)
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
