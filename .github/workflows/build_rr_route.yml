@@ -41,6 +41,7 @@ jobs:
             'OptiScaler/shaders/dlssnr/precompile/dlssnr_temporal_Shader.h',
             'OptiScaler/shaders/dlssnr/precompile/dlssnr_temporal_Shader.cso',
             'OptiScaler/dlssnr/DlssNr_MenuTemporal.cpp',
+            'OptiScaler/shaders/dlssnr/DlssNr_Dx12_Register.cpp',
             'OptiScaler/dlssnr/DlssNr_AsyncStatus.h')
           foreach ($f in $retired) { if (Test-Path $f) { Remove-Item $f -Force; Write-Host "removed $f" } }
       - name: Compile the NR resolve shader (fxc, cs_5_0, entry CSMain)
