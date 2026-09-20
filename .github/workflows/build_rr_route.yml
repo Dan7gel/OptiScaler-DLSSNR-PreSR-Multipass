@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: true
+          fetch-depth: 0
       - name: Apply source overlay (nr-rr-route-overlay.zip in the repo root, if present)
         shell: powershell
         run: |
@@ -80,6 +81,38 @@ jobs:
             [System.IO.File]::WriteAllText("$dir\$stem.h", $s2.ToString())
             Write-Output ("Compiled {0}: {1} bytes" -f $src, $b.Length)
           }
+      - name: Restore the compiled objects from the previous run
+        uses: actions/cache@v4
+        with:
+          path: OptiScaler/x64/Release
+          key: nr-objects-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            nr-objects-${{ runner.os }}-
+      - name: Age the unchanged sources so MSBuild recompiles only what changed
+        shell: pwsh
+        run: |
+          $shaFile = 'OptiScaler/x64/Release/.built-from'
+          if (-not (Test-Path $shaFile)) { Write-Output 'No cached build: full compile.'; exit 0 }
+          $base = (Get-Content $shaFile -Raw).Trim()
+          $changed = @{}
+          $diff = git diff --name-only $base HEAD 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Output 'Base commit unknown: full compile.'; exit 0 }
+          $diff | ForEach-Object { if ($_) { $changed[$_.Replace('\','/')] = $true } }
+          # Files the overlay step changed or added in the working tree count as changed too.
+          git status --porcelain --untracked-files=all | ForEach-Object {
+            if ($_.Length -gt 3) { $changed[$_.Substring(3).Trim().Trim('"').Replace('\','/')] = $true }
+          }
+          $old = [datetime]'2000-01-01'
+          $now = Get-Date
+          $aged = 0
+          git ls-files | ForEach-Object {
+            $f = $_.Replace('\','/')
+            if (-not (Test-Path $f)) { return }
+            if ($changed.ContainsKey($f)) { (Get-Item $f).LastWriteTime = $now }
+            else { (Get-Item $f).LastWriteTime = $old; $aged++ }
+          }
+          foreach ($f in $changed.Keys) { if (Test-Path $f) { (Get-Item $f).LastWriteTime = $now } }
+          Write-Output ("Aged {0} unchanged files; {1} changed since {2}" -f $aged, $changed.Count, $base)
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
       - name: Package
@@ -87,6 +120,11 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
         run: ./package_release.ps1 -Version $env:PACKAGE_VERSION
+      - name: Remember which commit the objects were built from
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path OptiScaler/x64/Release | Out-Null
+          (git rev-parse HEAD).Trim() | Set-Content -NoNewline OptiScaler/x64/Release/.built-from
       - name: Bundle the NVFP4 hybrid assets (nvfp4.zip in the repo root, if present)
         shell: pwsh
         run: |
